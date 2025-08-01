@@ -1,1 +1,1 @@
-# mindbox-demo
+https://docs.google.com/document/d/1Zl7Fj3HgLqc8Ecs_-W209S9UrpIbkji1_rgU9oK3jVU/edit?tab=t.0
