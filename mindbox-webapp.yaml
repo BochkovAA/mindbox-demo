@@ -1,1 +1,85 @@
-
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mindbox-webapp
+spec:
+  replicas: 4                 # Можно и меньше из-за HPA, просто лучше быть готовым сразу к нагрузке)
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1             # Разрешено создать на 1 под больше, чем replicas, во время обновления. Интересно как поведет себя HPA при 5 репликах и новом деплое XD
+      maxUnavailable: 0       # Во время обновления не допускается снижение подов
+  selector:
+    matchLabels:
+      app: mindbox-webapp
+  template:
+    metadata:
+      labels:
+        app: mindbox-webapp
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:    # Можно еще и жестко задать через requiredDuringScheduling...
+            - weight: 100    # Приоритет правила
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - mindbox-webapp    # Ищем поды с такой же меткой для антиаффинити
+                topologyKey: "topology.kubernetes.io/zone"    # Распределяем поды по разным зонам узлов (если настроено)
+      containers:
+      - name: mindbox-webapp-container
+        image: registry/image:tag
+        resources:
+          requests:
+            cpu: "0.1"
+            memory: "128Mi"
+          limits:
+            cpu: "0.5"        # У вас было нагрузочное, вы знаете сколько в пике потребляет, сюда эту цифру и можно бахнуть. Если жор десятикратный, например, то уж как-нибудь через VPA можно попробовать (но это уже другая история)
+            memory: "256Mi"   # Понимаю, что при ваших объемах важна оптимизация, но я привык оставлять небольшой кап)
+        readinessProbe:       # Пробки, если требуется
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 10    # Вместо этого можно и startupProbe засунуть, но не люблю их)
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 15    # Вместо этого можно и startupProbe засунуть, но не люблю их)
+          periodSeconds: 20
+---
+apiVersion: autoscaling/v2    # Ну и HPA для ночной нагрузки
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mindbox-webapp-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mindbox-webapp
+  minReplicas: 2              # Минимальное количество подов ночью для экономии ресурсов
+  maxReplicas: 5              # Максимально допустимое количество подов при непредвиденных пиках (1 пусть будет навсяк в запасе)
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70 # Если среднее использование CPU >70%, HPA добавит поды
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Окно остывания, прежде чем снижать реплики
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60   # Окно на увеличение нагрузки, прежде чем повышать реплики
+      policies:
+      - type: Pods
+        value: 2
+        periodSeconds: 60
